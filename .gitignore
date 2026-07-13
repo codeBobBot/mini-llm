@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model & Data files (large files)
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.h5
+*.ckpt
+*.pkl
+data/
+checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
