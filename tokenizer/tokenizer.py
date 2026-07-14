@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from .base import BaseTokenizer
 
-class CharacterTokenizer:
+
+class CharacterTokenizer(BaseTokenizer):
     """
     字符级分词器（Character-level Tokenizer）
 
@@ -20,48 +22,51 @@ class CharacterTokenizer:
         text = tokenizer.decode([10, 25]) # -> "你好"
     """
 
-    def __init__(self):
-        """初始化空的分词器，尚未建立词表"""
-        # vocab: 字符 -> ID 的映射，例如 {"天": 0, "安": 1, ...}
-        self.vocab = {}
-        # id_to_token: ID -> 字符的反向映射，例如 {0: "天", 1: "安", ...}
-        self.id_to_token = {}
+    # ----------------------------------------------------------------
+    # Template Method: train() 负责 I/O + 预处理，build_vocab() 负责建词表
+    # 以后 BPE 等子类只需重写 build_vocab()，train() 流程不用改
+    # ----------------------------------------------------------------
 
     def train(self, corpus_path):
         """
         在语料库上训练分词器，建立词表。
 
-        处理步骤：
-            1. 读取语料库文件的全部文本
-            2. 提取所有出现过的唯一字符（去重、排序）
-            3. 为每个字符分配一个唯一的数字 ID
-            4. 追加特殊 token：<PAD>（填充）和 <UNK>（未知字符）
+        流程（Template Method）：
+            1. 读取语料库文件
+            2. 文本预处理（子类可按需扩展）
+            3. 调用 build_vocab() 建词表（子类可重写）
+            4. 追加特殊 Token
+            5. 构建反向映射表
 
         参数：
             corpus_path: 语料库文件的路径（纯文本，UTF-8 编码）
         """
-        # 读取语料库全部文本
         text = Path(corpus_path).read_text(encoding="utf-8")
 
-        # 去掉换行符后，收集所有不重复的字符并排序（保证每次训练结果一致）
-        chars = sorted(set(text.replace("\n", "")))
+        # --- 预处理管道：以后可逐步扩展 ---
+        text = text.replace("\n", "")
+        # text = text.lower()
+        # text = normalize(text)
+        # ----------------------------------
 
-        # 为每个字符分配 ID：第 0 个字符 ID=0，第 1 个字符 ID=1，以此类推
+        self.build_vocab(text)
+        self._add_special_tokens()
+        self._rebuild_id_to_token()
+
+    def build_vocab(self, text):
+        """
+        基于预处理后的文本建立字符级词表。
+
+        以后 BPE 等分词器只需重写此方法即可。
+
+        参数：
+            text: 预处理后的纯文本
+        """
+        # 收集所有不重复的字符并排序（保证每次训练结果一致）
+        chars = sorted(set(text))
         self.vocab = {
             token: idx
             for idx, token in enumerate(chars)
-        }
-
-        # 添加两个特殊 token：
-        #   <PAD> - 填充符，用于将不等长的序列填充到相同长度（batch 训练时需要）
-        #   <UNK> - 未知符，用于处理训练时未出现过的新字符
-        self.vocab["<PAD>"] = len(self.vocab)
-        self.vocab["<UNK>"] = len(self.vocab)
-
-        # 构建反向映射表（ID -> 字符），用于 decode 时快速查找
-        self.id_to_token = {
-            idx: token
-            for token, idx in self.vocab.items()
         }
 
     def encode(self, text):
@@ -77,10 +82,21 @@ class CharacterTokenizer:
         返回：
             list[int]: 每个字符对应的 ID 列表
         """
-        return [
+        ids = [
             self.vocab.get(ch, self.vocab["<UNK>"])
             for ch in text
         ]
+
+        # --- 扩展点：以后可在此处增加 ---
+        # if add_bos:
+        #     ids.insert(0, self.vocab["<BOS>"])
+        # if add_eos:
+        #     ids.append(self.vocab["<EOS>"])
+        # if max_length:
+        #     ids = ids[:max_length]
+        # --------------------------------
+
+        return ids
 
     def decode(self, ids):
         """
@@ -95,7 +111,14 @@ class CharacterTokenizer:
         返回：
             str: 解码后的文本
         """
-        return "".join(
+        tokens = [
             self.id_to_token.get(i, "<UNK>")
             for i in ids
-        )
+        ]
+
+        # --- 扩展点：以后可在此处增加 ---
+        # tokens = [t for t in tokens if t != "<PAD>"]
+        # --------------------------------
+
+        text = "".join(tokens)
+        return text
