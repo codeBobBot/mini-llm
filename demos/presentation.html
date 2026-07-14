@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三问 LLM 底牌 — BPE · Transformer · RoPE</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@700;900&display=swap" rel="stylesheet">
+<style>
+/* ===== CSS Variables ===== */
+:root {
+  --bg-deep: #0a0e17;
+  --bg-card: #111827;
+  --bg-card-hover: #1a2332;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-amber: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+  --accent-violet: #8b5cf6;
+  --accent-blue: #3b82f6;
+  --border-subtle: rgba(255,255,255,0.06);
+  --shadow-glow-amber: 0 0 40px rgba(245, 158, 11, 0.15);
+  --shadow-glow-cyan: 0 0 40px rgba(6, 182, 212, 0.15);
+  --shadow-glow-emerald: 0 0 40px rgba(16, 185, 129, 0.15);
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  line-height: 1.7;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== Background Effects ===== */
+.bg-grid {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 70%);
+}
+.bg-orb {
+  position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.08; z-index: 0; pointer-events: none;
+}
+.bg-orb-1 { width: 600px; height: 600px; background: var(--accent-amber); top: -200px; left: -150px; }
+.bg-orb-2 { width: 500px; height: 500px; background: var(--accent-cyan); bottom: -150px; right: -150px; }
+.bg-orb-3 { width: 400px; height: 400px; background: var(--accent-violet); top: 40%; right: -100px; }
+
+/* ===== Slide Container ===== */
+.slides-container {
+  position: relative; z-index: 1;
+  max-width: 1100px; margin: 0 auto; padding: 40px 24px;
+}
+.slide {
+  display: none; min-height: 100vh;
+  padding: 80px 0 60px; opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s var(--transition-smooth), transform 0.6s var(--transition-smooth);
+}
+.slide.active {
+  display: flex; flex-direction: column; justify-content: center;
+  opacity: 1; transform: translateY(0);
+}
+.slide.active .reveal { opacity: 0; transform: translateY(20px); animation: revealIn 0.6s var(--transition-smooth) forwards; }
+
+/* ===== Typography ===== */
+.slide-title {
+  font-family: 'Space Grotesk', 'Noto Sans SC', sans-serif;
+  font-size: clamp(2.2rem, 4vw, 3.5rem);
+  font-weight: 900; letter-spacing: -0.02em;
+  line-height: 1.15; margin-bottom: 16px;
+}
+.slide-title .highlight { color: var(--accent-amber); }
+.slide-subtitle { font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 48px; font-weight: 300; }
+.section-header { display: flex; align-items: center; gap: 16px; margin-bottom: 40px; }
+.section-number {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 4rem; font-weight: 900; color: var(--accent-amber);
+  line-height: 1; opacity: 0.3;
+}
+.section-text h2 { font-family: 'Space Grotesk', 'Noto Sans SC', sans-serif; font-size: 1.8rem; font-weight: 700; margin-bottom: 4px; }
+.section-text p { color: var(--text-secondary); font-size: 1rem; }
+
+/* ===== Card Grid ===== */
+.card-grid { display: grid; gap: 20px; }
+.card-grid-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.card-grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.card-grid-4 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+/* ===== Cards ===== */
+.card {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); padding: 28px;
+  transition: all 0.3s var(--transition-smooth);
+}
+.card:hover { background: var(--bg-card-hover); transform: translateY(-2px); }
+.card-amber { border-left: 3px solid var(--accent-amber); }
+.card-cyan { border-left: 3px solid var(--accent-cyan); }
+.card-emerald { border-left: 3px solid var(--accent-emerald); }
+.card-rose { border-left: 3px solid var(--accent-rose); }
+.card-violet { border-left: 3px solid var(--accent-violet); }
+.card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.card h3 .icon { font-size: 1.4rem; }
+.card p, .card li { color: var(--text-secondary); font-size: 0.95rem; }
+
+/* ===== Code Blocks ===== */
+.code-block {
+  background: #0d1117; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-md); padding: 20px 24px;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+  line-height: 1.6; overflow-x: auto; position: relative;
+  margin: 16px 0;
+}
+.code-block .lang-label {
+  position: absolute; top: -10px; right: 16px;
+  background: var(--accent-amber); color: #000;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+  font-weight: 700; padding: 2px 10px; border-radius: 4px;
+}
+.code-keyword { color: #ff7b72; }
+.code-func { color: #d2a8ff; }
+.code-string { color: #a5d6ff; }
+.code-comment { color: #8b949e; }
+.code-number { color: #79c0ff; }
+
+/* ===== Tables ===== */
+.data-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.9rem; }
+.data-table th {
+  text-align: left; padding: 12px 16px; background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: 600;
+  color: var(--accent-amber);
+}
+.data-table td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); }
+.data-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+/* ===== Quote ===== */
+.quote-block {
+  border-left: 4px solid var(--accent-amber); padding: 16px 24px;
+  background: rgba(245, 158, 11, 0.05); border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  margin: 24px 0;
+}
+.quote-block p { font-size: 1.1rem; font-weight: 500; color: var(--accent-amber); font-style: italic; }
+
+/* ===== BPE Animation ===== */
+.bpe-viz { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 20px; }
+.bpe-step {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  position: relative;
+}
+.bpe-tokens {
+  display: flex; gap: 4px; flex-wrap: wrap; justify-content: center;
+}
+.bpe-token {
+  padding: 6px 12px; border-radius: var(--radius-sm);
+  font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;
+  font-weight: 500; transition: all 0.5s var(--transition-smooth);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.bpe-token.char { background: rgba(139, 92, 246, 0.15); color: #c4b5fd; }
+.bpe-token.merged { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.3); animation: mergePop 0.5s var(--transition-smooth); }
+.bpe-token.final { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
+.bpe-arrow { color: var(--text-muted); font-size: 1.5rem; margin: 0 8px; }
+.bpe-step-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+.bpe-merge-badge {
+  padding: 4px 10px; border-radius: 12px; font-size: 0.7rem;
+  background: rgba(16, 185, 129, 0.15); color: #6ee7b7;
+  font-family: 'JetBrains Mono', monospace; font-weight: 500;
+}
+
+/* ===== Attention Visualization ===== */
+.attn-container { display: flex; gap: 40px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 20px; }
+.attn-sentence { display: flex; flex-direction: column; gap: 8px; }
+.attn-word {
+  padding: 8px 16px; border-radius: var(--radius-sm);
+  font-weight: 500; text-align: center;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  transition: all 0.3s;
+}
+.attn-word.q { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.3); color: #93c5fd; }
+.attn-word.k { background: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.3); color: #c4b5fd; }
+.attn-word.v { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: #6ee7b7; }
+.attn-matrix {
+  display: grid; border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-md);
+  overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;
+}
+.attn-cell {
+  padding: 10px 14px; text-align: center; border-right: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  transition: all 1.5s var(--transition-smooth);
+}
+.attn-cell.header { background: rgba(255,255,255,0.05); font-weight: 600; color: var(--text-secondary); }
+.attn-cell.highlight { background: rgba(245, 158, 11, 0.2) !important; color: #fcd34d !important; font-weight: 700; }
+.attn-cell.mid { background: rgba(245, 158, 11, 0.08); color: #fbbf24; }
+
+/* ===== RoPE Visualization ===== */
+.rope-viz { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 20px; }
+.rope-svg-container { position: relative; width: 300px; height: 300px; }
+.rope-vector { transition: transform 1.5s var(--transition-smooth); }
+.rope-angle-label {
+  position: absolute; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+/* ===== MoE Diagram ===== */
+.moe-viz {
+  display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap;
+  justify-content: center; padding: 20px;
+}
+.moe-col {
+  display: flex; flex-direction: column; gap: 12px; align-items: center;
+}
+.moe-node {
+  padding: 12px 20px; border-radius: var(--radius-md);
+  font-weight: 600; font-size: 0.85rem; text-align: center;
+  transition: all 0.4s var(--transition-smooth); min-width: 100px;
+}
+.moe-input { background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); color: #93c5fd; }
+.moe-router { background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fcd34d; }
+.moe-expert { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; font-size: 0.75rem; }
+.moe-expert.inactive { opacity: 0.25; filter: grayscale(0.6); }
+.moe-out { background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; }
+.moe-arrow-down { color: var(--text-muted); font-size: 1.2rem; }
+.moe-arrow-right { color: var(--text-muted); font-size: 1.5rem; display: flex; align-items: center; }
+
+/* ===== Temp Visualization ===== */
+.temp-bar-container { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }
+.temp-bar-row { display: flex; align-items: center; gap: 10px; }
+.temp-bar-label {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+  min-width: 60px; text-align: right; color: var(--text-secondary);
+}
+.temp-bar-outer { flex: 1; height: 22px; background: rgba(255,255,255,0.04); border-radius: 4px; overflow: hidden; }
+.temp-bar-inner {
+  height: 100%; border-radius: 4px; transition: width 1.5s var(--transition-smooth);
+  display: flex; align-items: center; padding-left: 8px;
+  font-size: 0.7rem; font-family: 'JetBrains Mono', monospace;
+}
+.temp-bar-inner.hot { background: linear-gradient(90deg, rgba(244, 63, 94, 0.6), rgba(245, 158, 11, 0.6)); }
+.temp-bar-inner.warm { background: linear-gradient(90deg, rgba(245, 158, 11, 0.5), rgba(16, 185, 129, 0.5)); }
+.temp-bar-inner.cool { background: linear-gradient(90deg, rgba(59, 130, 246, 0.4), rgba(139, 92, 246, 0.4)); }
+
+/* ===== Comparison ===== */
+.comparison-container { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.compare-box {
+  padding: 24px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+}
+.compare-box.left { background: rgba(244, 63, 94, 0.05); border-left: 3px solid var(--accent-rose); }
+.compare-box.right { background: rgba(16, 185, 129, 0.05); border-left: 3px solid var(--accent-emerald); }
+.compare-box h4 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+
+/* ===== Navigation ===== */
+.nav-bar {
+  position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; z-index: 100;
+  background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(20px);
+  padding: 8px 16px; border-radius: 40px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.nav-dot {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15); background: transparent;
+  color: var(--text-secondary); font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: all 0.3s var(--transition-smooth);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+}
+.nav-dot:hover { border-color: rgba(255,255,255,0.3); color: var(--text-primary); }
+.nav-dot.active { background: var(--accent-amber); color: #000; border-color: var(--accent-amber); }
+.nav-arrow {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15); background: transparent;
+  color: var(--text-secondary); font-size: 1rem;
+  cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;
+}
+.nav-arrow:hover { border-color: var(--accent-amber); color: var(--accent-amber); }
+.slide-counter {
+  position: fixed; top: 24px; right: 32px; z-index: 100;
+  font-family: 'Space Grotesk', sans-serif; font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.slide-counter span { color: var(--accent-amber); font-weight: 700; }
+
+/* ===== Animations ===== */
+@keyframes revealIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes mergePop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pulse { animation: pulse-amber 2s infinite; }
+.float { animation: float 3s ease-in-out infinite; }
+
+.reveal { opacity: 0; transform: translateY(20px); }
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.4s; }
+.delay-5 { animation-delay: 0.5s; }
+.delay-6 { animation-delay: 0.6s; }
+.delay-7 { animation-delay: 0.7s; }
+.delay-8 { animation-delay: 0.8s; }
+
+/* ===== Tag/Badge ===== */
+.tag {
+  display: inline-block; padding: 4px 12px; border-radius: 12px;
+  font-size: 0.75rem; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+}
+.tag-amber { background: rgba(245, 158, 11, 0.15); color: #fcd34d; }
+.tag-cyan { background: rgba(6, 182, 212, 0.15); color: #67e8f9; }
+.tag-emerald { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
+.tag-rose { background: rgba(244, 63, 94, 0.15); color: #fda4af; }
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .slides-container { padding: 24px 16px; }
+  .slide { padding: 60px 0 40px; }
+  .comparison-container { grid-template-columns: 1fr; }
+  .card-grid-2, .card-grid-3, .card-grid-4 { grid-template-columns: 1fr; }
+  .attn-container { flex-direction: column; }
+  .nav-bar { padding: 6px 12px; gap: 4px; }
+  .nav-dot { width: 32px; height: 32px; font-size: 0.7rem; }
+}
+
+/* ===== Print ===== */
+@media print {
+  .slide { display: block !important; opacity: 1 !important; transform: none !important; min-height: auto; page-break-after: always; }
+  .nav-bar, .slide-counter, .bg-grid, .bg-orb { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Background -->
+<div class="bg-grid"></div>
+<div class="bg-orb bg-orb-1"></div>
+<div class="bg-orb bg-orb-2"></div>
+<div class="bg-orb bg-orb-3"></div>
+
+<!-- Slide Counter -->
+<div class="slide-counter"><span id="currentSlide">1</span> / <span id="totalSlides">8</span></div>
+
+<!-- ===== SLIDES ===== -->
+<div class="slides-container">
+
+<!-- ====== SLIDE 0: TITLE ====== -->
+<section class="slide active" data-index="0">
+  <div style="text-align: center;">
+    <div class="reveal delay-1" style="margin-bottom: 16px;">
+      <span class="tag tag-amber" style="font-size: 0.85rem;">LLM 知识分享</span>
+    </div>
+    <h1 class="slide-title reveal delay-2">
+      三问 <span class="highlight">LLM</span> 底牌
+    </h1>
+    <p class="reveal delay-3" style="font-size: 1.4rem; font-weight: 300; color: var(--text-secondary); margin-bottom: 12px;">
+      BPE · Transformer · RoPE
+    </p>
+    <p class="reveal delay-4" style="color: var(--text-muted); font-size: 0.95rem; max-width: 600px; margin: 0 auto 32px;">
+      从三个日常疑问出发，揭开大语言模型核心技术
+    </p>
+    <div class="reveal delay-5 card-grid card-grid-3" style="max-width: 700px; margin: 0 auto;">
+      <div class="card card-amber"><h3><span class="icon">🔢</span> Q1</h3><p style="color:var(--text-secondary);">为什么不同厂商 Token 计费规则不一样？</p></div>
+      <div class="card card-cyan"><h3><span class="icon">🏗️</span> Q2</h3><p style="color:var(--text-secondary);">DeepSeek/Kimi/Qwen 的核心区别在哪？</p></div>
+      <div class="card card-emerald"><h3><span class="icon">🎲</span> Q3</h3><p style="color:var(--text-secondary);">为什么同一问题两次答案不同？</p></div>
+    </div>
+    <div class="reveal delay-6" style="margin-top: 32px;">
+      <p style="color: var(--text-muted); font-size: 0.8rem;">按 → 或点击圆点翻页</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== SLIDE 1: Q1 - Token计数现象 ====== -->
+<section class="slide" data-index="1">
+  <div class="section-header reveal delay-1">
+    <div class="section-number">Q1</div>
+    <div class="section-text">
+      <h2>为什么 Token 计费不一样？</h2>
+      <p>同一句话，三家模型的 Token 数不同——有人在骗钱吗？</p>
+    </div>
+  </div>
+
+  <div class="card-grid card-grid-3 reveal delay-2" style="margin-bottom: 24px;">
+    <div class="card card-amber">
+      <h3><span class="icon">🤖</span> DeepSeek</h3>
+      <div style="font-size: 2rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-amber);">~5</div>
+      <p style="color: var(--text-secondary);">"今天天气真好" 的 Token 数</p>
+    </div>
+    <div class="card card-cyan">
+      <h3><span class="icon">🌟</span> Kimi</h3>
+      <div style="font-size: 2rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-cyan);">~7</div>
+      <p style="color: var(--text-secondary);">"今天天气真好" 的 Token 数</p>
+    </div>
+    <div class="card card-emerald">
+      <h3><span class="icon">🧠</span> OpenAI</h3>
+      <div style="font-size: 2rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-emerald);">~6</div>
+      <p style="color: var(--text-secondary);">"今天天气真好" 的 Token 数</p>
+    </div>
+  </div>
+
+  <div class="quote-block reveal delay-3">
+    <p>Token 不是"字"，而是厂商定义的最小语义单元。不同词表 = 不同切分 = 不同数量。</p>
+  </div>
+
+  <div class="card card-violet reveal delay-4">
+    <h3><span class="icon">🔑</span> 核心原因</h3>
+    <div class="card-grid card-grid-3" style="margin-top: 12px;">
+      <div><p style="font-size: 0.85rem;"><strong style="color:var(--accent-amber);">训练数据不同</strong><br><span style="color:var(--text-secondary);">在英文数据上训练的分词器切中文更碎</span></p></div>
+      <div><p style="font-size: 0.85rem;"><strong style="color:var(--accent-cyan);">词表大小策略不同</strong><br><span style="color:var(--text-secondary);">大词表 = 更少 Token = 更快，但更占显存</span></p></div>
+      <div><p style="font-size: 0.85rem;"><strong style="color:var(--accent-emerald);">商业策略</strong><br><span style="color:var(--text-secondary);">Token 计费直接影响成本和利润</span></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== SLIDE 2: BPE 算法原理 ====== -->
+<section class="slide" data-index="2">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-emerald);">BPE</div>
+    <div class="section-text">
+      <h2>BPE 分词器原理</h2>
+      <p>Byte Pair Encoding —— 从字符开始，反复合并最常见的相邻字符对</p>
+    </div>
+  </div>
+
+  <!-- BPE Step Animation -->
+  <div class="card reveal delay-2" style="margin-bottom: 20px;">
+    <h3><span class="icon">📖</span> 以 "北京北京天安门" 为例的 BPE 合并过程</h3>
+
+    <!-- Step 0: 初始状态 -->
+    <div id="bpeStep0" class="bpe-step" style="display: flex;">
+      <span class="tag tag-rose" style="margin-bottom: 8px;">Step 0 · 初始词表 (5 字符)</span>
+      <div class="bpe-tokens">
+        <span class="bpe-token char">北</span><span class="bpe-token char">京</span><span class="bpe-token char">北</span><span class="bpe-token char">京</span><span class="bpe-token char">天</span><span class="bpe-token char">安</span><span class="bpe-token char">门</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">vocab = {"北", "京", "北", "京", "天", "安", "门"} (5个唯一) → 传入 Step 1</p>
+    </div>
+
+    <!-- Arrow + Merge Info -->
+    <div style="text-align: center; padding: 8px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+      <span class="bpe-arrow">↓</span>
+      <span class="bpe-merge-badge">"北京" 出现 2 次 → 合并为 "北京"</span>
+      <span class="bpe-arrow">↓</span>
+    </div>
+
+    <!-- Step 1: 第一次合并 -->
+    <div class="bpe-step" style="display: flex; margin-top: 8px;">
+      <span class="tag tag-amber" style="margin-bottom: 8px;">Step 1 · vocab_size=6</span>
+      <div class="bpe-tokens">
+        <span class="bpe-token merged">北京</span><span class="bpe-token merged">北京</span><span class="bpe-token char">天</span><span class="bpe-token char">安</span><span class="bpe-token char">门</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">vocab 新增 "北京" → 继续查找下一个高频对</p>
+    </div>
+
+    <!-- Arrow -->
+    <div style="text-align: center; padding: 8px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+      <span class="bpe-arrow">↓</span>
+      <span class="bpe-merge-badge">"天安" 出现 1 次 → 合并为 "天安"</span>
+      <span class="bpe-arrow">↓</span>
+    </div>
+
+    <!-- Step 2: 第二次合并 -->
+    <div class="bpe-step" style="display: flex; margin-top: 8px;">
+      <span class="tag tag-emerald" style="margin-bottom: 8px;">Step 2 · vocab_size=7</span>
+      <div class="bpe-tokens">
+        <span class="bpe-token merged">北京</span><span class="bpe-token merged">北京</span><span class="bpe-token merged">天安</span><span class="bpe-token char">门</span>
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">... 重复直到词表达到目标大小</p>
+    </div>
+  </div>
+
+  <div class="card-grid card-grid-2 reveal delay-3">
+    <div class="card card-emerald">
+      <h3><span class="icon">✅</span> 最终效果</h3>
+      <p style="color:var(--text-secondary);">高频词"北京"保持为一个 token — 效率高<br>低频词"天安"拆更碎 — 灵活不浪费</p>
+    </div>
+    <div class="card card-amber">
+      <h3><span class="icon">🎯</span> 为什么不同</h3>
+      <p style="color:var(--text-secondary);">vocab_size 是人为设定的超参数<br>合并次数不同 → 同一文本切出的 token 数量不同</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== SLIDE 3: Q2 - 三大厂商差异 ====== -->
+<section class="slide" data-index="3">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-cyan);">Q2</div>
+    <div class="section-text">
+      <h2>DeepSeek / Kimi / Qwen 核心区别在哪？</h2>
+      <p>答案都藏在 Transformer 架构的"定制化"里</p>
+    </div>
+  </div>
+
+  <div class="card-grid card-grid-3 reveal delay-2" style="margin-bottom: 24px;">
+    <div class="card card-amber">
+      <h3><span class="icon">🔥</span> DeepSeek</h3>
+      <div style="font-size: 1.5rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-amber);">MoE 架构</div>
+      <p style="color: var(--text-secondary);">671B 参数 → 每次只激活 37B<br>稀疏激活，推理成本极低</p>
+      <span class="tag tag-amber" style="margin-top: 8px;">便宜到离谱</span>
+    </div>
+    <div class="card card-cyan">
+      <h3><span class="icon">📏</span> Kimi</h3>
+      <div style="font-size: 1.5rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-cyan);">RoPE 外推</div>
+      <p style="color: var(--text-secondary);">训练时 8K/32K → 推理外推到 200 万<br>位置编码的数学魔法</p>
+      <span class="tag tag-cyan" style="margin-top: 8px;">上下文超长</span>
+    </div>
+    <div class="card card-violet">
+      <h3><span class="icon">📦</span> Qwen</h3>
+      <div style="font-size: 1.5rem; font-weight: 900; font-family: 'Space Grotesk', sans-serif; color: var(--accent-violet);">Dense 多尺寸</div>
+      <p style="color: var(--text-secondary);">0.5B ~ 72B 全覆盖<br>从树莓派到数据中心都能跑</p>
+      <span class="tag tag-violet" style="margin-top: 8px;">灵活选择</span>
+    </div>
+  </div>
+
+  <!-- Transformer Pipeline -->
+  <div class="card reveal delay-3" style="text-align: center;">
+    <h3><span class="icon">⚙️</span> Transformer 处理流程</h3>
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 16px; font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;">
+      <span class="tag tag-amber">Token IDs</span> →
+      <span class="tag tag-cyan">Embedding</span> →
+      <span class="tag tag-emerald">RoPE</span> →
+      <span class="tag tag-rose">Attention×N</span> →
+      <span class="tag tag-violet">FFN×N</span> →
+      <span class="tag tag-amber">Linear</span> →
+      <span class="tag tag-cyan">Softmax</span> →
+      <span class="tag tag-emerald">Next Token</span>
+    </div>
+    <p style="color: var(--text-muted); margin-top: 8px; font-size: 0.85rem;">三个厂商在 Attention、FFN、位置编码上各有定制 → 形成核心差异</p>
+  </div>
+</section>
+
+<!-- ====== SLIDE 4: Self-Attention ====== -->
+<section class="slide" data-index="4">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-rose);">Attn</div>
+    <div class="section-text">
+      <h2>Self-Attention：每个 Token 都在"开会"</h2>
+      <p>Attention 让每个词关注所有其他词，决定"该听谁的"</p>
+    </div>
+  </div>
+
+  <!-- Attention Matrix -->
+  <div class="attn-container reveal delay-2">
+    <div class="attn-matrix" style="grid-template-columns: 60px repeat(4, 80px);">
+      <div class="attn-cell header"></div>
+      <div class="attn-cell header">北京</div>
+      <div class="attn-cell header">今天</div>
+      <div class="attn-cell header">天气</div>
+      <div class="attn-cell header">好</div>
+
+      <div class="attn-cell header">北京</div>
+      <div class="attn-cell highlight">0.7</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.1</div>
+
+      <div class="attn-cell header">今天</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell highlight">0.6</div>
+      <div class="attn-cell">0.2</div>
+
+      <div class="attn-cell header">天气</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.2</div>
+      <div class="attn-cell highlight">0.6</div>
+
+      <div class="attn-cell header">好</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell">0.1</div>
+      <div class="attn-cell mid">0.4</div>
+      <div class="attn-cell mid">0.4</div>
+    </div>
+  </div>
+
+  <!-- Q/K/V Diagram -->
+  <div class="card-grid card-grid-3 reveal delay-3" style="margin-top: 24px;">
+    <div class="card card-cyan">
+      <h3><span class="icon">🔍</span> Q (Query) - "我在找什么？"</h3>
+      <p style="color:var(--text-secondary);">每个词向所有词"提问"<br>决定自己对谁感兴趣</p>
+    </div>
+    <div class="card card-violet">
+      <h3><span class="icon">🔑</span> K (Key) - "我能提供什么？"</h3>
+      <p style="color:var(--text-secondary);">每个词展示自己的"标签"<br>供其他词来匹配</p>
+    </div>
+    <div class="card card-emerald">
+      <h3><span class="icon">💎</span> V (Value) - "我实际给你什么？"</h3>
+      <p style="color:var(--text-secondary);">经过注意力权重加权后<br>最终输出的实际内容</p>
+    </div>
+  </div>
+
+  <div class="quote-block reveal delay-4" style="margin-top: 16px;">
+    <p>Q · K^T → 注意力分数 → Softmax → 加权 V → 输出。除以 √d 防止梯度消失。</p>
+  </div>
+</section>
+
+<!-- ====== SLIDE 5: RoPE + MoE ====== -->
+<section class="slide" data-index="5">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-violet);">RoPE</div>
+    <div class="section-text">
+      <h2>RoPE 旋转位置编码 + MoE 混合专家</h2>
+      <p>Kimi 的长上下文和 DeepSeek 的低成本秘密</p>
+    </div>
+  </div>
+
+  <!-- RoPE -->
+  <div class="card card-violet reveal delay-2" style="margin-bottom: 20px;">
+    <h3><span class="icon">🔄</span> RoPE：把向量"旋转"一个角度</h3>
+    <div style="display: flex; gap: 40px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 16px;">
+      <div style="text-align: center;">
+        <svg width="200" height="200" viewBox="-110 -110 220 220">
+          <!-- Axes -->
+          <line x1="-100" y1="0" x2="100" y2="0" stroke="rgba(255,255,255,0.1)"/>
+          <line x1="0" y1="-100" x2="0" y2="100" stroke="rgba(255,255,255,0.1)"/>
+          <!-- Circle -->
+          <circle cx="0" cy="0" r="80" fill="none" stroke="rgba(255,255,255,0.08)"/>
+          <!-- Vectors with rotation -->
+          <line x1="0" y1="0" x2="80" y2="0" stroke="#93c5fd" stroke-width="3" marker-end="url(#arrow-blue)"/>
+          <line x1="0" y1="0" x2="55" y2="55" stroke="#c4b5fd" stroke-width="3" transform="rotate(45)" style="transform-origin:0 0;"/>
+          <line x1="0" y1="0" x2="0" y2="80" stroke="#a78bfa" stroke-width="3"/>
+          <!-- Labels -->
+          <text x="85" y="-5" fill="#93c5fd" font-size="11" font-family="JetBrains Mono">pos 0 (θ=0°)</text>
+          <text x="-90" y="-70" fill="#c4b5fd" font-size="11" font-family="JetBrains Mono">pos 1 (θ=45°)</text>
+          <text x="5" y="-82" fill="#a78bfa" font-size="11" font-family="JetBrains Mono">pos 2 (θ=90°)</text>
+          <!-- Angle arcs -->
+          <path d="M 25,0 A 25,25 0 0,1 17.7,17.7" fill="none" stroke="rgba(245,158,11,0.5)" stroke-width="1.5" stroke-dasharray="3"/>
+          <text x="30" y="12" fill="rgba(245,158,11,0.7)" font-size="9" font-family="JetBrains Mono">Δθ</text>
+        </svg>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 8px;">"猫"位置0 → "老鼠"位置2 → 角度差 2θ（自动蕴含相对位置）</p>
+      </div>
+      <div style="max-width: 360px;">
+        <div class="comparison-container" style="grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="compare-box left" style="padding: 16px;">
+            <h4 style="font-size:0.9rem;">传统绝对编码</h4>
+            <p style="font-size:0.8rem; color:var(--text-secondary);">训练最长512 → 推理512以上就乱</p>
+          </div>
+          <div class="compare-box right" style="padding: 16px;">
+            <h4 style="font-size:0.9rem;">RoPE 旋转编码</h4>
+            <p style="font-size:0.8rem; color:var(--text-secondary);">可以外推到训练时没见过的长度</p>
+          </div>
+        </div>
+        <p style="color: var(--accent-cyan); font-weight: 600; margin-top: 16px; font-size: 0.9rem;">
+          → Kimi 利用 RoPE 的数学性质，把 32K 外推到 200 万 token 上下文
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MoE -->
+  <div class="card card-amber reveal delay-3">
+    <h3><span class="icon">🧩</span> MoE：每次只激活一部分参数</h3>
+    <div class="moe-viz">
+      <div class="moe-col">
+        <div class="moe-node moe-input">Token 输入</div>
+        <div class="moe-arrow-down">↓</div>
+        <div class="moe-node moe-router pulse">路由器<br><span style="font-size:0.7rem;font-weight:400;">"该找哪位专家？"</span></div>
+      </div>
+      <div style="display:flex;align-items:center;">
+        <span class="moe-arrow-right">→</span>
+      </div>
+      <div class="moe-col" style="gap:4px;">
+        <div class="moe-node moe-expert">专家 1</div>
+        <div class="moe-node moe-expert">专家 2</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 3 (闲置)</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 4 (闲置)</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 5 (闲置)</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 6 (闲置)</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 7 (闲置)</div>
+        <div class="moe-node moe-expert" style="opacity:0.25;filter:grayscale(0.6);">专家 8 (闲置)</div>
+      </div>
+      <div style="display:flex;align-items:center;">
+        <span class="moe-arrow-right">→</span>
+      </div>
+      <div class="moe-col">
+        <div class="moe-node moe-out">加权合并</div>
+        <div class="moe-arrow-down">↓</div>
+        <div class="moe-node moe-input">输出</div>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:12px;">
+      <p style="font-size:0.9rem;">
+        <span style="color:var(--accent-amber); font-weight:700;">DeepSeek-V3</span>：
+        总参数 <strong>671B</strong>，每次只激活 <strong style="color:var(--accent-emerald);">37B</strong>（约 1/18）
+        → 推理成本极低
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== SLIDE 6: Q3 - 生成机制 ====== -->
+<section class="slide" data-index="6">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-emerald);">Q3</div>
+    <div class="section-text">
+      <h2>为什么同一问题两次答案不同？</h2>
+      <p>LLM 不是搜索引擎，是"概率预测机"</p>
+    </div>
+  </div>
+
+  <div class="card card-rose reveal delay-2" style="margin-bottom: 20px;">
+    <h3><span class="icon">🎰</span> LLM 生成 = 每步一次概率抽奖</h3>
+    <div class="code-block">
+      <span class="lang-label">流程</span>
+      <span class="code-comment"># 不是：数据库检索 → 返回固定答案</span>
+      <span class="code-comment"># 而是：逐 token 预测下一个最可能的 token</span><br>
+      <span style="color:#a5d6ff;">输入</span> <span style="color:#d2a8ff;">"1+1="</span>
+      <br>  <span style="color:#8b949e;">↓ 模型计算下一个 token 的概率分布</span>
+      <br>  <span style="color:#ff7b72;">{</span><span style="color:#a5d6ff;">"2"</span>: <span style="color:#79c0ff;">0.85</span>, <span style="color:#a5d6ff;">"两"</span>: <span style="color:#79c0ff;">0.05</span>, <span style="color:#a5d6ff;">"二"</span>: <span style="color:#79c0ff;">0.04</span>, <span style="color:#a5d6ff;">"贰"</span>: <span style="color:#79c0ff;">0.02</span>, ...<span style="color:#ff7b72;">}</span>
+      <br>  <span style="color:#8b949e;">↓ 根据策略选一个 → 假设选了 "2"</span>
+      <br>  <span style="color:#8b949e;">↓ 输入变成 "1+1=2"，继续预测下一个 token</span>
+      <br>  <span style="color:#ff7b72;">{</span><span style="color:#a5d6ff;">"。"</span>: <span style="color:#79c0ff;">0.7</span>, <span style="color:#a5d6ff;">"，"</span>: <span style="color:#79c0ff;">0.1</span>, <span style="color:#a5d6ff;">"亲"</span>: <span style="color:#79c0ff;">0.02</span>, ...<span style="color:#ff7b72;">}</span>
+      <br>  <span style="color:#8b949e;">↓ 如果选了 "亲"</span>
+      <br><span style="color:#a5d6ff;">输出</span> <span style="color:#d2a8ff;">"等于2，亲"</span>
+    </div>
+  </div>
+
+  <div class="card-grid card-grid-3 reveal delay-3">
+    <div class="card card-rose">
+      <h3><span class="icon">🌡️</span> Temperature</h3>
+      <p style="color:var(--text-secondary); margin-bottom:8px;">温度越高，概率分布越"平坦"</p>
+      <table class="data-table" style="font-size:0.75rem;">
+        <tr><th>值</th><th>效果</th></tr>
+        <tr><td style="color:var(--accent-rose); font-weight:700;">0.1</td><td>几乎总选最高概率 → 确定性</td></tr>
+        <tr><td style="color:var(--accent-amber); font-weight:700;">0.7</td><td>适度随机 → 平衡</td></tr>
+        <tr><td style="color:var(--accent-cyan); font-weight:700;">1.5</td><td>低概率也有机会 → 高度随机</td></tr>
+      </table>
+    </div>
+    <div class="card card-cyan">
+      <h3><span class="icon">🎯</span> Top-p</h3>
+      <p style="color:var(--text-secondary); margin-bottom:8px;">只从累计概率达 p 的候选中选</p>
+      <table class="data-table" style="font-size:0.75rem;">
+        <tr><th>值</th><th>效果</th></tr>
+        <tr><td style="color:var(--accent-rose); font-weight:700;">0.1</td><td>只在最可能的 10% 里选</td></tr>
+        <tr><td style="color:var(--accent-amber); font-weight:700;">0.5</td><td>50% 候选参与</td></tr>
+        <tr><td style="color:var(--accent-cyan); font-weight:700;">0.9</td><td>90% 候选参与 → 多样性高</td></tr>
+      </table>
+    </div>
+    <div class="card card-violet">
+      <h3><span class="icon">📊</span> Top-k</h3>
+      <p style="color:var(--text-secondary); margin-bottom:8px;">只保留概率最高的 k 个候选</p>
+      <table class="data-table" style="font-size:0.75rem;">
+        <tr><th>值</th><th>效果</th></tr>
+        <tr><td style="color:var(--accent-rose); font-weight:700;">10</td><td>10 选 1 → 很集中</td></tr>
+        <tr><td style="color:var(--accent-amber); font-weight:700;">50</td><td>50 选 1 → 适中</td></tr>
+        <tr><td style="color:var(--accent-cyan); font-weight:700;">100</td><td>100 选 1 → 很多样</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="quote-block reveal delay-4">
+    <p>LLM 不知道"1+1=2"，它只知道在中文里 "1+1=" 后面出现 "2" 的概率最高。Temperature 就是你的确定性旋钮。</p>
+  </div>
+</section>
+
+<!-- ====== SLIDE 7: SUMMARY ====== -->
+<section class="slide" data-index="7">
+  <div class="section-header reveal delay-1">
+    <div class="section-number" style="color: var(--accent-amber);">⇌</div>
+    <div class="section-text">
+      <h2>三问贯穿 LLM 全链路</h2>
+      <p>输入 → 理解 → 输出</p>
+    </div>
+  </div>
+
+  <!-- Flow Diagram -->
+  <div class="card reveal delay-2" style="margin-bottom: 24px; text-align: center; overflow: hidden;">
+    <div style="display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; padding: 24px 0; position: relative;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:80px;height:80px;border-radius:50%;background:rgba(245,158,11,0.15);border:2px solid rgba(245,158,11,0.3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">📝</div>
+        <span style="font-weight:600;font-size:0.85rem;">文本输入</span>
+      </div>
+      <span style="font-size:1.5rem;color:var(--accent-amber);">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:80px;height:80px;border-radius:50%;background:rgba(16,185,129,0.15);border:2px solid rgba(16,185,129,0.3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">🔢</div>
+        <span style="font-weight:600;font-size:0.85rem;">BPE 分词</span>
+        <span style="font-size:0.7rem;color:var(--accent-emerald);">Q1</span>
+      </div>
+      <span style="font-size:1.5rem;color:var(--accent-amber);">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:80px;height:80px;border-radius:50%;background:rgba(6,182,212,0.15);border:2px solid rgba(6,182,212,0.3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">🧠</div>
+        <span style="font-weight:600;font-size:0.85rem;">Transformer</span>
+        <span style="font-size:0.7rem;color:var(--accent-cyan);">Q2</span>
+      </div>
+      <span style="font-size:1.5rem;color:var(--accent-amber);">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:80px;height:80px;border-radius:50%;background:rgba(244,63,94,0.15);border:2px solid rgba(244,63,94,0.3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">🎲</div>
+        <span style="font-weight:600;font-size:0.85rem;">概率采样</span>
+        <span style="font-size:0.7rem;color:var(--accent-rose);">Q3</span>
+      </div>
+      <span style="font-size:1.5rem;color:var(--accent-amber);">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:80px;height:80px;border-radius:50%;background:rgba(139,92,246,0.15);border:2px solid rgba(139,92,246,0.3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">💬</div>
+        <span style="font-weight:600;font-size:0.85rem;">文本输出</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key Takeaways -->
+  <div class="card-grid card-grid-3 reveal delay-3">
+    <div class="card card-amber">
+      <h3><span class="icon">Q1</span> BPE 分词器</h3>
+      <p style="color:var(--text-secondary); font-size:0.9rem;">
+        文本 → Token ID 的映射<br>
+        不同词表 → 不同切分 → 不同计费<br>
+        Token 不是"字"，是厂商定义的最小语义单元
+      </p>
+    </div>
+    <div class="card card-cyan">
+      <h3><span class="icon">Q2</span> Transformer 架构</h3>
+      <p style="color:var(--text-secondary); font-size:0.9rem;">
+        Attention 让模型"开会"决定关注谁<br>
+        RoPE 旋转编码实现长上下文外推<br>
+        MoE 稀疏激活降低推理成本
+      </p>
+    </div>
+    <div class="card card-rose">
+      <h3><span class="icon">Q3</span> 生成机制</h3>
+      <p style="color:var(--text-secondary); font-size:0.9rem;">
+        LLM 是"概率预测机"不是"事实查询机"<br>
+        每次生成 = 一次概率采样<br>
+        Temperature 决定"确定性"
+      </p>
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div class="card reveal delay-4" style="text-align:center; margin-top:24px; background:rgba(245,158,11,0.05); border-color:rgba(245,158,11,0.15);">
+    <h3 style="color: var(--accent-amber);">🚀 想深入？最好的方式是从零写一个 MiniLLM</h3>
+    <p style="color: var(--text-secondary); margin-top: 8px;">
+      亲手实现 Tokenizer → Embedding → Attention → Decoder<br>
+      之后再看任何 LLM 论文都会豁然开朗
+    </p>
+    <div class="code-block" style="margin-top: 16px; text-align: left;">
+      <span class="lang-label">Demo</span>
+      <span class="code-comment"># 运行演示代码</span>
+      python demos/q1_bpe_demo.py    <span class="code-comment"># BPE 分词器</span>
+      python demos/q2_transformer_demo.py  <span class="code-comment"># Transformer + RoPE</span>
+      python demos/q3_generation_demo.py   <span class="code-comment"># 生成机制</span>
+    </div>
+  </div>
+</section>
+
+</div><!-- end slides-container -->
+
+<!-- ===== NAVIGATION ===== -->
+<nav class="nav-bar">
+  <button class="nav-arrow" onclick="prevSlide()" title="上一页">◀</button>
+  <button class="nav-dot active" onclick="goToSlide(0)">1</button>
+  <button class="nav-dot" onclick="goToSlide(1)">2</button>
+  <button class="nav-dot" onclick="goToSlide(2)">3</button>
+  <button class="nav-dot" onclick="goToSlide(3)">4</button>
+  <button class="nav-dot" onclick="goToSlide(4)">5</button>
+  <button class="nav-dot" onclick="goToSlide(5)">6</button>
+  <button class="nav-dot" onclick="goToSlide(6)">7</button>
+  <button class="nav-dot" onclick="goToSlide(7)">8</button>
+  <button class="nav-arrow" onclick="nextSlide()" title="下一页">▶</button>
+</nav>
+
+<script>
+// ===== Slide Navigation =====
+let currentSlide = 0;
+const totalSlides = document.querySelectorAll('.slide').length;
+document.getElementById('totalSlides').textContent = totalSlides;
+
+function showSlide(index) {
+  const slides = document.querySelectorAll('.slide');
+  const dots = document.querySelectorAll('.nav-dot');
+
+  slides.forEach(s => s.classList.remove('active'));
+  dots.forEach(d => d.classList.remove('active'));
+
+  currentSlide = ((index % totalSlides) + totalSlides) % totalSlides;
+  slides[currentSlide].classList.add('active');
+
+  // Update active dot (skip arrow buttons)
+  const activeDot = dots[currentSlide];
+  if (activeDot) activeDot.classList.add('active');
+
+  document.getElementById('currentSlide').textContent = currentSlide + 1;
+
+  // Trigger reveal animations
+  requestAnimationFrame(() => {
+    slides[currentSlide].querySelectorAll('.reveal').forEach((el, i) => {
+      el.style.animationDelay = `${0.1 + i * 0.1}s`;
+      el.style.animation = 'none';
+      el.offsetHeight;
+      el.style.animation = `revealIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) ${0.1 + i * 0.1}s forwards`;
+    });
+  });
+}
+
+function nextSlide() { showSlide(currentSlide + 1); }
+function prevSlide() { showSlide(currentSlide - 1); }
+function goToSlide(index) { showSlide(index); }
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+    e.preventDefault();
+    nextSlide();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    prevSlide();
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    goToSlide(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    goToSlide(totalSlides - 1);
+  }
+});
+
+// Touch swipe
+let touchStartX = 0;
+document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend', (e) => {
+  const diff = touchStartX - e.changedTouches[0].clientX;
+  if (Math.abs(diff) > 60) diff > 0 ? nextSlide() : prevSlide();
+});
+
+// ===== Animate BPE steps on slide 2 =====
+let bpeAnimationRunning = false;
+function animateBPE() {
+  if (bpeAnimationRunning) return;
+  const slide2 = document.querySelector('[data-index="2"]');
+  if (!slide2.classList.contains('active')) return;
+
+  bpeAnimationRunning = true;
+  const step0 = document.getElementById('bpeStep0');
+  if (!step0) { bpeAnimationRunning = false; return; }
+
+  // Highlight merge pairs sequentially
+  const tokens = step0.querySelectorAll('.bpe-token.char');
+  let phase = 0;
+
+  function animatePhase() {
+    if (phase === 0) {
+      // Highlight "北" + "京" pairs
+      highlightPair(0, 1);
+      highlightPair(2, 3);
+      setTimeout(() => { phase = 1; animatePhase(); }, 800);
+    } else if (phase === 1) {
+      // Pulse effect on merged
+      const merged = document.querySelectorAll('.bpe-token.merged');
+      merged.forEach((t, i) => { t.style.animation = `mergePop 0.5s cubic-bezier(0.4, 0, 0.2, 1) ${i * 0.1}s forwards`; });
+      bpeAnimationRunning = false;
+    }
+  }
+
+  function highlightPair(i, j) {
+    tokens[i].style.background = 'rgba(16,185,129,0.3)';
+    tokens[i].style.borderColor = 'rgba(16,185,129,0.5)';
+    tokens[j].style.background = 'rgba(16,185,129,0.3)';
+    tokens[j].style.borderColor = 'rgba(16,185,129,0.5)';
+    setTimeout(() => {
+      tokens[i].style.background = '';
+      tokens[i].style.borderColor = '';
+      tokens[j].style.background = '';
+      tokens[j].style.borderColor = '';
+    }, 600);
+  }
+
+  animatePhase();
+  bpeAnimationRunning = false;
+}
+
+// Run BPE animation when slide 2 becomes active
+const observer = new MutationObserver(() => {
+  const slide2 = document.querySelector('[data-index="2"]');
+  if (slide2 && slide2.classList.contains('active')) {
+    setTimeout(() => { bpeAnimationRunning = false; animateBPE(); }, 300);
+  }
+});
+observer.observe(document.querySelector('.slides-container'), { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+// ===== Animate attention matrix on slide 4 =====
+function animateAttention() {
+  const slide4 = document.querySelector('[data-index="4"]');
+  if (!slide4 || !slide4.classList.contains('active')) return;
+
+  const cells = slide4.querySelectorAll('.attn-cell:not(.header)');
+  cells.forEach((cell, i) => {
+    cell.style.opacity = '0';
+    cell.style.transform = 'scale(0.7)';
+    setTimeout(() => {
+      cell.style.opacity = '1';
+      cell.style.transform = 'scale(1)';
+      cell.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+    }, 100 + i * 80);
+  });
+}
+
+// Run on slide 4
+const observer2 = new MutationObserver(() => {
+  const slide4 = document.querySelector('[data-index="4"]');
+  if (slide4 && slide4.classList.contains('active')) {
+    setTimeout(animateAttention, 300);
+  }
+});
+observer2.observe(document.querySelector('.slides-container'), { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+// ===== Initial Reveal =====
+document.querySelectorAll('.slide.active .reveal').forEach((el, i) => {
+  el.style.animationDelay = `${0.2 + i * 0.1}s`;
+  el.style.animation = `revealIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) ${0.2 + i * 0.1}s forwards`;
+});
+</script>
+
+</body>
+</html>
