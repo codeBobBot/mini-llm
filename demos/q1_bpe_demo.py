@@ -19,71 +19,126 @@ def sep(title):
     print(f"{'─' * 55}")
 
 
+def _base_char_count():
+    """计算语料库中去除特殊 token 后的基础字符数"""
+    char_tok = CharacterTokenizer()
+    char_tok.train("dataset/corpus.txt")
+    return len(char_tok.vocab) - len(char_tok.SPECIAL_TOKENS)
+
+
 def demo_1_same_text_different_tokens():
     """
     同一个文本，不同 tokenizer 切出的 token 数不同
     """
     sep("Part 1: 同一文本 → 不同 Token 数")
 
-    test_texts = [
-        "北京今天天气真好，适合出去玩",
-        "机器学习是人工智能的核心分支",
-        "DeepSeek 的 MoE 架构让推理成本大幅降低",
-    ]
+    base_chars = _base_char_count()
+    # BPE 词表大小必须在基础字符之上留有合并空间
+    bpe_vocab_size = base_chars + 200
 
     char_tok = CharacterTokenizer()
     char_tok.train("dataset/corpus.txt")
 
-    bpe_tok = BPETokenizer(vocab_size=100)
+    bpe_tok = BPETokenizer(vocab_size=bpe_vocab_size)
     bpe_tok.train("dataset/corpus.txt")
 
-    print(f"\n{'文本':<30s} {'字符分词器':>10s} {'BPE分词器':>10s}")
-    print(f"{'─' * 30} {'─' * 10} {'─' * 10}")
+    print(f"\n[语料库基础字符数]: {base_chars}")
+    print(f"[BPE 词表大小]: {bpe_vocab_size} = {base_chars}(基础字符) + {bpe_vocab_size - base_chars}(合并)")
+    print(f"[BPE 实际合并次数]: {len(bpe_tok.merge_history)}\n")
+
+    # 选语料库中常见的多字词组合，确保 BPE 能学到合并规则
+    test_texts = [
+        "人工智能正在改变世界",
+        "机器学习是人工智能的核心分支",
+        "注意力机制是Transformer的核心创新",
+        "大语言模型是自然语言处理的前沿技术",
+        "位置编码让模型知道词语的顺序",
+    ]
+
+    header = f"{'文本':<34s} {'字符级':>6s} {'BPE':>6s} {'减少':>6s}"
+    print(header)
+    print("-" * len(header))
 
     for text in test_texts:
         char_ids = char_tok.encode(text)
         bpe_ids = bpe_tok.encode(text)
-        print(f"{text:<28s} {len(char_ids):>8d} 个 {len(bpe_ids):>8d} 个")
+        reduction = len(char_ids) - len(bpe_ids)
+        print(f"{text:<32s} {len(char_ids):>4d}个 {len(bpe_ids):>4d}个 {reduction:>4d}个")
 
-    print(f"\n结论: 同一段文本，BPE 通过合并高频组合减少了 token 数量。")
-    print(f"      不同厂商用不同的 BPE 词表 → Token 计费不同是必然的。")
+    print(f"\n结论: BPE 将高频组合合并为一个 token，有效减少了 token 数量。")
+    print(f"      如果 vocab_size 太小（≤ 基础字符数），BPE 退化为字符分词器，没有合并效果。")
 
 
 def demo_2_bpe_merge_process():
     """
-    逐步展示 BPE 的合并过程 —— 现场推演
+    展示 BPE 逐步合并过程 + 最终 token 对比
     """
-    sep("Part 2: BPE 合并过程 —— 现场推演")
+    sep("Part 2: BPE 学到了哪些组合？—— 现场推演")
 
-    text = "北京北京天安门天安门广场"
-    print(f"\n原始文本: {text}")
-    print(f"字符数: {len(text)}")
+    base_chars = _base_char_count()
+    bpe_vocab_size = base_chars + 200
 
-    # 用一个小 vocabsize 强制只合并几次，方便展示
-    bpe = BPETokenizer(vocab_size=50)
-    bpe._train_bpe(text)
+    bpe = BPETokenizer(vocab_size=bpe_vocab_size)
+    bpe.train("dataset/corpus.txt")
 
-    print(f"\nBPE 合并历史 ({len(bpe.merge_history)} 步):")
-    print(f"{'步骤':>4s}  {'Pair':>12s}  {'→':>2s}  {'新Token':<12s}  {'频率':>4s}")
-    print(f"{'─' * 4}  {'─' * 12}  {'─' * 2}  {'─' * 12}  {'─' * 4}")
+    # 选一段能充分展示 BPE 合并效果的文本
+    text = "人工智能正在改变我们的生活方式，大语言模型是自然语言处理的前沿技术"
 
-    for i, (a, b, merged, freq) in enumerate(bpe.merge_history):
-        print(f"{i + 1:>4d}  ({a},{b}){'':>8s} →  {merged:<12s}  {freq:>4d}")
-
-    # 展示最终编码结果
-    ids = bpe.encode(text)
-    tokens = [bpe.id_to_token[i] for i in ids]
-    print(f"\n最终切分结果: {' | '.join(tokens)}")
-    print(f"Token 数量: {len(ids)}")
-
-    # 与字符级对比
-    print(f"\n对比字符级分词器:")
     char_tok = CharacterTokenizer()
     char_tok.train("dataset/corpus.txt")
+
     char_ids = char_tok.encode(text)
-    char_tokens = [char_tok.id_to_token[i] for i in char_ids]
-    print(f"  字符级: {' | '.join(char_tokens)} → {len(char_ids)} tokens")
-    print(f"  BPE:    {' | '.join(tokens)} → {len(ids)} tokens")
+    char_tokens = [
+        char_tok.id_to_token[i]
+        for i in char_ids
+        if char_tok.id_to_token[i] not in char_tok.SPECIAL_TOKENS
+    ]
+
+    bpe_ids = bpe.encode(text)
+    bpe_tokens = [
+        bpe.id_to_token[i]
+        for i in bpe_ids
+        if bpe.id_to_token[i] not in bpe.SPECIAL_TOKENS
+    ]
+
+    print(f"\n原文: {text}\n")
+    print(f"字符级 ({len(char_tokens)} tokens):")
+    print(f"  {' | '.join(char_tokens)}")
+    print(f"\nBPE     ({len(bpe_tokens)} tokens):")
+    print(f"  {' | '.join(bpe_tokens)}")
+    print(f"\n>> BPE 减少了 {len(char_tokens) - len(bpe_tokens)} 个 token（合并率 {len(bpe_tokens) / len(char_tokens):.0%}）")
+
+    # 展示合并历史
+    print(f"\nBPE 部分合并规则 (共 {len(bpe.merge_history)} 条，展示前 12 条):")
+    print(f"{'步骤':>4s}  {'Pair':>16s}  →  {'新Token':<16s}  {'频率':>4s}")
+    print(f"{'─' * 4}  {'─' * 16}  {'─' * 2}  {'─' * 16}  {'─' * 4}")
+    for i, (a, b, merged, freq) in enumerate(bpe.merge_history[:12]):
+        print(f"{i + 1:>4d}  ({a}, {b}){'':>10s} →  {merged:<16s}  {freq:>4d}")
+    if len(bpe.merge_history) > 12:
+        print(f"  ... 共 {len(bpe.merge_history)} 条合并规则")
+
+    # 额外演示：逐步骤展示一段短文本的 BPE 编码过程
+    sep("Part 2.1: 短文本逐步合并过程")
+    short_text = "北京天安门广场很壮观"
+    print(f"\n原文: {short_text} (共 {len(short_text)} 字符)")
+    print(f"\n逐步合并:")
+    tokens = list(short_text)
+    print(f"  初始: {' | '.join(tokens)}  ({len(tokens)} tokens)")
+    for step, (a, b, merged, freq) in enumerate(bpe.merge_history):
+        new_tokens = []
+        i = 0
+        while i < len(tokens):
+            if i < len(tokens) - 1 and tokens[i] == a and tokens[i + 1] == b:
+                new_tokens.append(merged)
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+        if new_tokens != tokens:
+            tokens = new_tokens
+            step_label = f"步骤{step+1}"
+            print(f"  {step_label:>5s}: {' | '.join(tokens)}  ({len(tokens)} tokens)")
+    print(f"\n最终: {len(tokens)} 个 token，比字符级减少了 {len(short_text) - len(tokens)} 个")
 
 
 def demo_3_vocab_size_effect():
@@ -92,26 +147,37 @@ def demo_3_vocab_size_effect():
     """
     sep("Part 3: 词表大小决定 Token 数（厂商的 trade-off）")
 
-    text = "北京今天天气真好适合出去玩机器学习深度学习很火"
+    base_chars = _base_char_count()
+    text = "人工智能正在改变我们的生活方式，大语言模型是自然语言处理的前沿技术"
 
     char_tok = CharacterTokenizer()
     char_tok.train("dataset/corpus.txt")
     char_count = len(char_tok.encode(text))
-    print(f"\n文本: {text}")
-    print(f"字符级分词器 token 数: {char_count} (每个字 = 1 token)")
-    print(f"\n{'Vocab Size':>14s}  {'Token 数':>10s}  {'说明':>20s}")
-    print(f"{'─' * 14}  {'─' * 10}  {'─' * 20}")
 
-    for vs in [30, 50, 80, 120, 180, 300]:
+    print(f"\n文本: {text}")
+    print(f"基础字符数: {base_chars}（语料库中不重复的字符）")
+    print(f"字符级分词器 token 数: {char_count} (每个字 = 1 token)\n")
+
+    header = f"{'Vocab Size':>12s}  {'合并空间':>8s}  {'合并数':>6s}  {'Token':>5s}  {'减少':>5s}"
+    print(header)
+    print("-" * len(header))
+
+    # 从基础字符起步，逐步增大词表
+    margins = [20, 50, 100, 200, 400]
+    for margin in margins:
+        vs = base_chars + margin
         bpe = BPETokenizer(vocab_size=vs)
         bpe.train("dataset/corpus.txt")
         tok_count = len(bpe.encode(text))
-        desc = "小词表" if vs < 60 else ("中词表" if vs < 120 else "大词表")
-        print(f"{vs:>14d}  {tok_count:>10d}  {desc:<20s}")
+        actual_merges = len(bpe.merge_history)
+        reduction = char_count - tok_count
 
-    print(f"\n结论: 词表越大 → token 越少 → 推理越快 → 但显存占用更多")
+        bar = "#" * reduction  # token 减少数量可视化
+        print(f"{vs:>12d}  {margin:>8d}  {actual_merges:>6d}  {tok_count:>5d}  {reduction:>5d}  {bar}")
+
+    print(f"\n结论: 词表越大 → 合并越多 → token 越少 → 推理越快")
+    print(f"      但词表越大 → Embedding 矩阵越大 → 显存占用越多")
     print(f"      不同厂商在【速度】和【显存】之间做不同的 trade-off")
-    print(f"      这就是为什么每个厂商的 token 计费都不一样")
 
 
 def run_q1():
