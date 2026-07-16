@@ -53,6 +53,7 @@ class BPETokenizer(BaseTokenizer):
 
         # Step 1: 把文本拆成单个字符（用空格分隔，方便之后合并）
         tokens = list(text)
+        # print(f"tokens: {tokens}")
 
         # Step 2: 收集初始字符作为基础词表
         vocab = {ch: i for i, ch in enumerate(sorted(set(tokens)))}
@@ -65,6 +66,7 @@ class BPETokenizer(BaseTokenizer):
             for i in range(len(tokens) - 1):
                 pair_counts[(tokens[i], tokens[i + 1])] += 1
 
+            # pair_counts 为空字典，没有相邻 pair 可以统计
             if not pair_counts:
                 break
 

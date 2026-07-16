@@ -63,7 +63,16 @@ def demo_1_same_text_different_tokens():
         char_ids = char_tok.encode(text)
         bpe_ids = bpe_tok.encode(text)
         reduction = len(char_ids) - len(bpe_ids)
+
+        # 解码出实际 token
+        char_tokens = [char_tok.id_to_token[i] for i in char_ids
+                       if char_tok.id_to_token[i] not in char_tok.SPECIAL_TOKENS]
+        bpe_tokens = [bpe_tok.id_to_token[i] for i in bpe_ids
+                      if bpe_tok.id_to_token[i] not in bpe_tok.SPECIAL_TOKENS]
+
         print(f"{text:<32s} {len(char_ids):>4d}个 {len(bpe_ids):>4d}个 {reduction:>4d}个")
+        print(f"  字符级: {' | '.join(char_tokens)}")
+        print(f"  BPE  : {' | '.join(bpe_tokens)}\n")
 
     print(f"\n结论: BPE 将高频组合合并为一个 token，有效减少了 token 数量。")
     print(f"      如果 vocab_size 太小（≤ 基础字符数），BPE 退化为字符分词器，没有合并效果。")
@@ -141,44 +150,6 @@ def demo_2_bpe_merge_process():
     print(f"\n最终: {len(tokens)} 个 token，比字符级减少了 {len(short_text) - len(tokens)} 个")
 
 
-def demo_3_vocab_size_effect():
-    """
-    BPE 词表大小如何影响 token 数 —— 厂商的 trade-off
-    """
-    sep("Part 3: 词表大小决定 Token 数（厂商的 trade-off）")
-
-    base_chars = _base_char_count()
-    text = "人工智能正在改变我们的生活方式，大语言模型是自然语言处理的前沿技术"
-
-    char_tok = CharacterTokenizer()
-    char_tok.train("dataset/corpus.txt")
-    char_count = len(char_tok.encode(text))
-
-    print(f"\n文本: {text}")
-    print(f"基础字符数: {base_chars}（语料库中不重复的字符）")
-    print(f"字符级分词器 token 数: {char_count} (每个字 = 1 token)\n")
-
-    header = f"{'Vocab Size':>12s}  {'合并空间':>8s}  {'合并数':>6s}  {'Token':>5s}  {'减少':>5s}"
-    print(header)
-    print("-" * len(header))
-
-    # 从基础字符起步，逐步增大词表
-    margins = [20, 50, 100, 200, 400]
-    for margin in margins:
-        vs = base_chars + margin
-        bpe = BPETokenizer(vocab_size=vs)
-        bpe.train("dataset/corpus.txt")
-        tok_count = len(bpe.encode(text))
-        actual_merges = len(bpe.merge_history)
-        reduction = char_count - tok_count
-
-        bar = "#" * reduction  # token 减少数量可视化
-        print(f"{vs:>12d}  {margin:>8d}  {actual_merges:>6d}  {tok_count:>5d}  {reduction:>5d}  {bar}")
-
-    print(f"\n结论: 词表越大 → 合并越多 → token 越少 → 推理越快")
-    print(f"      但词表越大 → Embedding 矩阵越大 → 显存占用越多")
-    print(f"      不同厂商在【速度】和【显存】之间做不同的 trade-off")
-
 
 def run_q1():
     print("=" * 55)
@@ -186,7 +157,6 @@ def run_q1():
     print("=" * 55)
     demo_1_same_text_different_tokens()
     demo_2_bpe_merge_process()
-    demo_3_vocab_size_effect()
     print(f"\n{'=' * 55}")
     print("  Q1 Demo 完成")
     print("=" * 55)
